@@ -9,8 +9,9 @@ exp/
 BundleTrack/build
 # Distribution / packaging
 .Python
-foundationpose/
 build/
+install/
+log/
 develop-eggs/
 *.zip
 demo_data/*

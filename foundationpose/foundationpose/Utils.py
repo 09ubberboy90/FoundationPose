@@ -37,6 +37,8 @@ import ruamel.yaml
 yaml = ruamel.yaml.YAML()
 code_dir = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(code_dir)
+base_code_dir = "/home/ubb/Documents/FoundationPose"
+sys.path.append(base_code_dir)
 # sys.path.append(f"{code_dir}/mycpp/build")
 try:
   import kornia
@@ -45,10 +47,13 @@ except:
 try:
   import mycpp.build.mycpp as mycpp
 except:
+  print("ERROR: mycpp not found")
+  print(f"sys.path: {sys.path}")
   mycpp = None
 try:
   from bundlesdf.mycuda import common
 except:
+  print("ERROR: common not found")
   common = None
 try:
   import warp as wp
@@ -719,7 +724,8 @@ def draw_posed_3d_box(K, img, ob_in_cam, bbox, line_color=(0,255,0), linewidth=2
   xmin, ymin, zmin = min_xyz
   max_xyz = bbox.max(axis=0)
   xmax, ymax, zmax = max_xyz
-
+  img_copy = img.copy()
+  
   def draw_line3d(start,end,img):
     pts = np.stack((start,end),axis=0).reshape(-1,3)
     pts = (ob_in_cam@to_homo(pts).T).T[:,:3]   #(2,3)
@@ -732,21 +738,21 @@ def draw_posed_3d_box(K, img, ob_in_cam, bbox, line_color=(0,255,0), linewidth=2
     for z in [zmin,zmax]:
       start = np.array([xmin,y,z])
       end = start+np.array([xmax-xmin,0,0])
-      img = draw_line3d(start,end,img)
+      img_copy = draw_line3d(start,end,img_copy)
 
   for x in [xmin,xmax]:
     for z in [zmin,zmax]:
       start = np.array([x,ymin,z])
       end = start+np.array([0,ymax-ymin,0])
-      img = draw_line3d(start,end,img)
+      img_copy = draw_line3d(start,end,img_copy)
 
   for x in [xmin,xmax]:
     for y in [ymin,ymax]:
       start = np.array([x,y,zmin])
       end = start+np.array([0,0,zmax-zmin])
-      img = draw_line3d(start,end,img)
+      img_copy = draw_line3d(start,end,img_copy)
 
-  return img
+  return img_copy
 
 
 def projection_matrix_from_intrinsics(K, height, width, znear, zfar, window_coords='y_down'):

@@ -10,10 +10,11 @@
 
 from calendar import c
 from cycler import K
-from estimater import *
-from datareader import *
-import argparse
 import sys
+sys.path.append('/home/ubb/Documents/FoundationPose/foundationpose')
+from foundationpose.estimater import *
+from foundationpose.datareader import *
+import argparse
 import pyzed.sl as sl
 
 

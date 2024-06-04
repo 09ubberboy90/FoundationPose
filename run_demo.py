@@ -6,19 +6,20 @@
 # distribution of this software and related documentation without an express
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 
-
-from estimater import *
-from datareader import *
+import sys
+sys.path.append('/home/ubb/Documents/FoundationPose/foundationpose')
+from foundationpose.estimater import *
+from foundationpose.datareader import *
 import argparse
 
 
 if __name__=='__main__':
   parser = argparse.ArgumentParser()
   code_dir = os.path.dirname(os.path.realpath(__file__))
-  parser.add_argument('--mesh_file', type=str, default=f'{code_dir}/demo_data/mustard0/mesh/textured_simple.obj')
-  parser.add_argument('--test_scene_dir', type=str, default=f'{code_dir}/demo_data/mustard0')
-  parser.add_argument('--est_refine_iter', type=int, default=5)
-  parser.add_argument('--track_refine_iter', type=int, default=2)
+  parser.add_argument('--mesh_file', type=str, default=f'{code_dir}/demo_data/cubes/mesh/untitled_times_2.ply')
+  parser.add_argument('--test_scene_dir', type=str, default=f'{code_dir}/demo_data/cubes_2')
+  parser.add_argument('--est_refine_iter', type=int, default=10)
+  parser.add_argument('--track_refine_iter', type=int, default=4)
   parser.add_argument('--debug', type=int, default=1)
   parser.add_argument('--debug_dir', type=str, default=f'{code_dir}/debug')
   args = parser.parse_args()
@@ -27,12 +28,13 @@ if __name__=='__main__':
   set_seed(0)
 
   mesh = trimesh.load(args.mesh_file)
-
+  print(mesh)
   debug = args.debug
   debug_dir = args.debug_dir
   os.system(f'rm -rf {debug_dir}/* && mkdir -p {debug_dir}/track_vis {debug_dir}/ob_in_cam')
 
   to_origin, extents = trimesh.bounds.oriented_bounds(mesh)
+  print(to_origin, extents)
   bbox = np.stack([-extents/2, extents/2], axis=0).reshape(2,3)
 
   scorer = ScorePredictor()
@@ -41,7 +43,7 @@ if __name__=='__main__':
   est = FoundationPose(model_pts=mesh.vertices, model_normals=mesh.vertex_normals, mesh=mesh, scorer=scorer, refiner=refiner, debug_dir=debug_dir, debug=debug, glctx=glctx)
   logging.info("estimator initialization done")
 
-  reader = YcbineoatReader(video_dir=args.test_scene_dir, shorter_side=None, zfar=np.inf)
+  reader = YcbineoatReader(video_dir=args.test_scene_dir,downscale=0.8, shorter_side=None, zfar=np.inf)
 
   for i in range(len(reader.color_files)):
     logging.info(f'i:{i}')

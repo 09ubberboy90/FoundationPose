@@ -17,8 +17,8 @@ import torch
 from omegaconf import OmegaConf
 from learning.models.refine_network import RefineNet
 from learning.datasets.h5_dataset import *
-from Utils import *
-from datareader import *
+from foundationpose.Utils import *
+from foundationpose.datareader import *
 
 
 
@@ -96,10 +96,10 @@ class PoseRefinePredictor:
     self.amp = True
     self.run_name = "2023-10-28-18-33-37"
     model_name = 'model_best.pth'
-    code_dir = os.path.dirname(os.path.realpath(__file__))
-    ckpt_dir = f'{code_dir}/../../weights/{self.run_name}/{model_name}'
+    code_dir = "/home/ubb/Documents/FoundationPose"
+    ckpt_dir = f'{code_dir}/weights/{self.run_name}/{model_name}'
 
-    self.cfg = OmegaConf.load(f'{code_dir}/../../weights/{self.run_name}/config.yml')
+    self.cfg = OmegaConf.load(f'{code_dir}/weights/{self.run_name}/config.yml')
 
     self.cfg['ckpt_dir'] = ckpt_dir
     self.cfg['enable_amp'] = True
