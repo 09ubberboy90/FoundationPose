@@ -14,52 +14,39 @@ import sys
 import pyzed.sl as sl
 import rclpy
 from rclpy.node import Node
-from geometry_msgs.msg import Pose
+from geometry_msgs.msg import Pose, PoseStamped
+from sensor_msgs.msg import Image, CameraInfo
+from scipy.spatial.transform import Rotation as R
+from cv_bridge import CvBridge
 
 class Tracker(Node):
     def __init__(self):
         super().__init__('tracker')
         self.code_dir = "/home/ubb/Documents/FoundationPose"
-        self.mesh_file =f'{self.code_dir}/demo_data/realtime/mesh/finger.ply'
-        self.mask_file =f'{self.code_dir}/demo_data/realtime/mask_2.png'
+        self.mesh_file =f'{self.code_dir}/demo_data/realtime/mesh/untitled.ply'
+        self.mask_file =f'{self.code_dir}/demo_data/realtime/mask.png'
         self.test_scene_dir =f'{self.code_dir}/demo_data/realtime'
         self.est_refine_iter =5
         self.track_refine_iter =2
-        self.debug =1
+        self.debug = 1
         self.debug_dir =f'{self.code_dir}/debug'
         
-        self.publisher_ = self.create_publisher(Pose, 'pose', 10)
-        timer_period = 0.5
+        self.publisher = self.create_publisher(Pose, 'pose', 10)
+        self.publisher_stamped = self.create_publisher(PoseStamped, 'pose_stamp', 10)
+        self.image_pub = self.create_publisher(Image, '/detected_object', 10)
+        
+        self.image_sub = self.create_subscription(Image, '/zed/zed_node/left/image_rect_color', self.image_callback, 10)
+        self.depth_sub = self.create_subscription(Image, '/zed/zed_node/depth/depth_registered', self.depth_callback, 10)
+        self.camera_info_sub = self.create_subscription(CameraInfo, '/zed/zed_node/left/camera_info', self.camera_info_callback, 10)
+        self.color = None
+        self.depth = None
+        self.camera_info = None
+        self.bridge = CvBridge()
+        
+        timer_period = 0.1
         self.timer = self.create_timer(timer_period, self.timer_callback)
-        self.i = 0
-        set_logging_format()
+        set_logging_format(logging.WARN)
         set_seed(0)
-        init = sl.InitParameters()
-        # Set configuration parameters for the ZED
-        init.depth_mode = sl.DEPTH_MODE.NEURAL_PLUS
-        init.camera_resolution = sl.RESOLUTION.HD720
-        init.camera_fps = 60  # The framerate is lowered to avoid any USB3 bandwidth issues
-        init.depth_maximum_distance = 8000
-        init.depth_minimum_distance = 200
-        init.coordinate_units = sl.UNIT.MILLIMETER
-
-        self.zed = sl.Camera()
-        status = self.zed.open(init)
-        if status != sl.ERROR_CODE.SUCCESS:
-            print(repr(status))
-            exit()
-            
-        fx = self.zed.get_camera_information().camera_configuration.calibration_parameters.left_cam.fx
-        fy = self.zed.get_camera_information().camera_configuration.calibration_parameters.left_cam.fy
-        cx = self.zed.get_camera_information().camera_configuration.calibration_parameters.left_cam.cx
-        cy = self.zed.get_camera_information().camera_configuration.calibration_parameters.left_cam.cy
-        self.K = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]])
-
-        self.image_size = self.zed.get_camera_information().camera_configuration.resolution
-
-        # Declare your sl.Mat matrices
-        self.image_zed = sl.Mat()
-        self.depth_image_zed = sl.Mat()
 
         self.mesh = trimesh.load(self.mesh_file)
         self.debug = self.debug
@@ -80,54 +67,81 @@ class Tracker(Node):
 
 
     def timer_callback(self):
-        err = self.zed.grab()
-        if err != sl.ERROR_CODE.SUCCESS:
+        if self.color is None or self.depth is None or self.camera_info is None:
             return
-        logging.info(f'i:{self.counter}')
-        self.zed.retrieve_image(self.image_zed, sl.VIEW.LEFT)
-        self.zed.retrieve_measure(self.depth_image_zed, sl.MEASURE.DEPTH)
-
-        color = self.image_zed.get_data()[...,:3]
-        color = cv2.cvtColor(color,cv2.COLOR_RGB2BGR)
-        depth = self.depth_image_zed.get_data().astype(np.uint16)/1e3
-        depth = cv2.resize(depth, (self.image_size.width, self.image_size.height),interpolation=cv2.INTER_NEAREST)
+        timing = self.get_clock().now()
         if self.counter == 0:
             mask = get_mask(self.image_size, self.mask_file).astype(bool)
-            pose = self.est.register(K=self.K, rgb=color, depth=depth,
+            pose = self.est.register(K=self.K, rgb=self.color, depth=self.depth,
                                 ob_mask=mask, iteration=self.est_refine_iter)
 
             if self.debug >= 3:
                 m = self.mesh.copy()
                 m.apply_transform(pose)
                 m.export(f'{self.debug_dir}/model_tf.obj')
-                xyz_map = depth2xyzmap(depth, self.K)
-                valid = depth >= 0.1
-                pcd = toOpen3dCloud(xyz_map[valid], color[valid])
+                xyz_map = depth2xyzmap(self.depth, self.K)
+                valid = self.depth >= 0.1
+                pcd = toOpen3dCloud(xyz_map[valid], self.color[valid])
                 o3d.io.write_point_cloud(
                     f'{self.debug_dir}/scene_complete.ply', pcd)
         else:
-            pose = self.est.track_one(rgb=color, depth=depth,
+            pose = self.est.track_one(rgb=self.color, depth=self.depth,
                                  K=self.K, iteration=self.track_refine_iter)
 
         os.makedirs(f'{self.debug_dir}/ob_in_cam', exist_ok=True)
+        pose = pose.reshape(4, 4)
         np.savetxt(
-            f'{self.debug_dir}/ob_in_cam/{self.counter}.txt', pose.reshape(4, 4))
+            f'{self.debug_dir}/ob_in_cam/{self.counter}.txt', pose)
+        self.publish_pose(pose)
 
         if self.debug >= 1:
             center_pose = pose@np.linalg.inv(self.to_origin)
             vis = draw_posed_3d_box(
-                self.K, img=color, ob_in_cam=center_pose, bbox=self.bbox)
+                self.K, img=self.color, ob_in_cam=center_pose, bbox=self.bbox)
             vis = draw_xyz_axis(vis, ob_in_cam=center_pose, scale=0.1,
                                 K=self.K, thickness=3, transparency=0, is_input_rgb=True)
-            cv2.imshow('1', vis[..., ::-1])
-            cv2.waitKey(1)
+        self.image_pub.publish(self.bridge.cv2_to_imgmsg(vis, 'rgb8'))
+        
 
         if self.debug >= 2:
             os.makedirs(f'{self.debug_dir}/track_vis', exist_ok=True)
             imageio.imwrite(
                 f'{self.debug_dir}/track_vis/{self.counter}.png', vis)
         self.counter += 1
-
+        self.get_logger().info('Publishing: "%s"' % str(self.get_clock().now() - timing))
+    
+    def publish_pose(self, pose):
+        stamped = PoseStamped()
+        stamped.header.stamp = self.get_clock().now().to_msg()
+        stamped.header.frame_id = "zed_camera_link" 
+        msg = Pose()
+        msg.position.x = float(pose[0,3])
+        msg.position.y = float(pose[1,3])
+        msg.position.z = float(pose[2,3])
+        quat = R.from_matrix(pose[:3, :3]).as_quat()
+        msg.orientation.x = quat[0]
+        msg.orientation.y = quat[1]
+        msg.orientation.z = quat[2]
+        msg.orientation.w = quat[3]
+        self.publisher.publish(msg)
+        stamped.pose = msg
+        self.publisher_stamped.publish(stamped)
+        
+    def image_callback(self, msg):
+        self.color = self.bridge.imgmsg_to_cv2(msg, 'rgb8')
+    
+    def depth_callback(self, msg):
+        self.depth = self.bridge.imgmsg_to_cv2(msg, 'mono16')/1e3
+    
+    def camera_info_callback(self, msg:CameraInfo):
+        self.camera_info = msg
+        self.fx = self.camera_info.k[0]
+        self.fy = self.camera_info.k[4]
+        self.cx = self.camera_info.k[2]
+        self.cy = self.camera_info.k[5]
+        self.K = np.array([[self.fx, 0, self.cx], [0, self.fy, self.cy], [0, 0, 1]])
+        self.image_size = self.camera_info.width, self.camera_info.height
+    
 def get_mask(image_size, file):
     mask = cv2.imread(file, -1)
     if len(mask.shape) == 3:
@@ -135,7 +149,7 @@ def get_mask(image_size, file):
         if mask[..., c].sum() > 0:
           mask = mask[..., c]
           break
-    mask = cv2.resize(mask, (image_size.width, image_size.height), interpolation=cv2.INTER_NEAREST).astype(
+    mask = cv2.resize(mask, image_size, interpolation=cv2.INTER_NEAREST).astype(
         bool).astype(np.uint8)
     return mask
 
