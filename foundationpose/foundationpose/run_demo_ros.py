@@ -35,7 +35,7 @@ class Tracker(Node):
         self.publisher_stamped = self.create_publisher(PoseStamped, 'pose_stamp', 10)
         self.image_pub = self.create_publisher(Image, '/detected_object', 10)
         
-        self.image_sub = self.create_subscription(Image, '/zed/zed_node/left/image_rect_color', self.image_callback, 10)
+        self.image_sub = self.create_subscription(Image, '/local/zed/zed_node/left/image_rect_color', self.image_callback, 10)
         self.depth_sub = self.create_subscription(Image, '/zed/zed_node/depth/depth_registered', self.depth_callback, 10)
         self.camera_info_sub = self.create_subscription(CameraInfo, '/zed/zed_node/left/camera_info', self.camera_info_callback, 10)
         self.color = None
